@@ -37,7 +37,7 @@ target_files = st.file_uploader("Deposer ici les fichers POP",type=["xlsx"],acce
 
 # ✅ Show how many target files were uploaded
 if target_files:
-    st.info(f"📦 {len(target_files)} target file(s) uploaded.")
+    st.info(f"📦 {len(target_files)} file(s) uploaded.")
 
 # -------------------------
 # Config (your rules)
@@ -196,7 +196,7 @@ def force_recalc_on_open(wb: openpyxl.Workbook):
 # -------------------------
 ready = mapping_file and source_file and target_files and len(target_files) > 0
 if not ready:
-    st.caption("Upload  at least 1 target file.")
+    st.caption("Upload  at least 1 pop file.")
     st.stop()
 
 if st.button("✅ Apply and generate ZIP"):
