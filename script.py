@@ -8,6 +8,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.utils.datetime import from_excel
 from openpyxl.workbook.properties import CalcProperties
 import re
+from pathlib import Path
 
 st.set_page_config(page_title="POP files", layout="centered")
 st.title("Création des fichiers POP")
@@ -23,8 +24,15 @@ L’application :
 # -------------------------
 # Uploads
 # -------------------------
-mapping_file = st.file_uploader("1) Mapping file (.xlsx) — Col A: 2026, Col B: 2025", type=["xlsx"])
-source_file  = st.file_uploader("2) Source file (.xlsx) — contains the correct formulas", type=["xlsx"])
+
+MAPPING_PATH = Path("Calendrier_comparatif_2026_vs_2025.xlsx")
+mapping_file = BytesIO(MAPPING_PATH.read_bytes())
+mapping_file.name = MAPPING_PATH.name
+
+source_PATH = Path("Book2.xlsx")
+source_file = BytesIO(source_PATH.read_bytes())
+source_file.name = source_PATH.name
+
 target_files = st.file_uploader("Deposer ici les fichers POP",type=["xlsx"],accept_multiple_files=True)
 
 # ✅ Show how many target files were uploaded
@@ -188,7 +196,7 @@ def force_recalc_on_open(wb: openpyxl.Workbook):
 # -------------------------
 ready = mapping_file and source_file and target_files and len(target_files) > 0
 if not ready:
-    st.caption("Upload the mapping + source file + at least 1 target file.")
+    st.caption("Upload  at least 1 target file.")
     st.stop()
 
 if st.button("✅ Apply and generate ZIP"):
