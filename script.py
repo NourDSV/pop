@@ -215,20 +215,19 @@ if st.button("✅ Apply and generate ZIP"):
 
             zip_buffer = BytesIO()
             updated_count = 0
+            total = len(target_files)
+
+            progress = st.progress(0)
 
             with ZipFile(zip_buffer, "w", compression=ZIP_DEFLATED) as zf:
                 for up in target_files:
                     wb_dst = openpyxl.load_workbook(BytesIO(up.getvalue()), data_only=False)
                     ws_dst = wb_dst[wb_dst.sheetnames[0]]
 
-                    # 1) Copy formula ranges
                     for r in RANGES_TO_COPY:
                         copy_range(ws_src, ws_dst, r)
 
-                    # 2) Apply mapping formulas
                     apply_mapping_formulas(ws_dst, mapping)
-
-                    # 3) Force recalc
                     force_recalc_on_open(wb_dst)
 
                     out = BytesIO()
@@ -240,6 +239,38 @@ if st.button("✅ Apply and generate ZIP"):
                     zf.writestr(zip_name, file_bytes)
 
                     updated_count += 1
+
+                    # ✅ update progress bar
+                    progress.progress(updated_count / total)
+
+
+            # zip_buffer = BytesIO()
+            # updated_count = 0
+
+            # with ZipFile(zip_buffer, "w", compression=ZIP_DEFLATED) as zf:
+            #     for up in target_files:
+            #         wb_dst = openpyxl.load_workbook(BytesIO(up.getvalue()), data_only=False)
+            #         ws_dst = wb_dst[wb_dst.sheetnames[0]]
+
+            #         # 1) Copy formula ranges
+            #         for r in RANGES_TO_COPY:
+            #             copy_range(ws_src, ws_dst, r)
+
+            #         # 2) Apply mapping formulas
+            #         apply_mapping_formulas(ws_dst, mapping)
+
+            #         # 3) Force recalc
+            #         force_recalc_on_open(wb_dst)
+
+            #         out = BytesIO()
+            #         wb_dst.save(out)
+            #         file_bytes = out.getvalue()
+
+            #         original_name = up.name.rsplit(".", 1)[0]
+            #         zip_name = f"{original_name}_updated.xlsx"
+            #         zf.writestr(zip_name, file_bytes)
+
+            #         updated_count += 1
 
             zip_buffer.seek(0)
 
