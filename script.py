@@ -43,16 +43,15 @@ if target_files:
 HEADER_ROW_2026 = 31
 HEADER_ROW_2025 = 3
 
-START_COL = 5      # E
-MAX_DAY_COL = 31   # AE
-SOURCE_TOTAL_COL = 32  # AF in source
+START_COL = 5         # E
+MAX_DAY_COL = 31      # AE (max search range for dates)
+SOURCE_TOTAL_COL = 32 # AF (Total column in source)
 
 COPY_BLOCKS = [
     (32, 48),
     (58, 72),
 ]
 
-# Total column formulas to copy (same rows as the copied blocks)
 TOTAL_COPY_ROWS = (32, 72)
 
 # -------------------------
@@ -132,6 +131,9 @@ def read_mapping(file_bytes: bytes):
     return mapping
 
 def find_last_day_col(ws):
+    """
+    Find the last column (E..AE) that contains a readable date in row 31.
+    """
     last = None
     for c in range(START_COL, MAX_DAY_COL + 1):
         d = cell_to_date(ws.cell(row=HEADER_ROW_2026, column=c), default_year=2026)
@@ -173,31 +175,22 @@ def apply_mapping_formulas(ws, mapping, end_day_col):
             f'{S}23*(1+$N$52)+{S}24*(1+$K$52))'
         )
 
-def rewrite_total_formula(formula: str, src_total_letter: str, tgt_total_letter: str) -> str:
-    if not isinstance(formula, str) or not formula.startswith("="):
-        return formula
-    pat = re.compile(rf'(\$?){src_total_letter}(\$?\d+)')
-    return pat.sub(rf'\1{tgt_total_letter}\2', formula)
+def copy_total_formula_dynamic(ws_dst, total_col, last_day_col):
+    """
+    Build Total formula that aggregates ONLY E..last_day_col for each row.
+    Uses SUM for numeric rows.
+    """
+    total_letter = get_column_letter(total_col)
+    start_letter = get_column_letter(START_COL)
+    last_letter  = get_column_letter(last_day_col)
 
-def copy_total_column(ws_src, ws_dst, target_total_col, row_from, row_to):
-    """
-    Copy Total formulas from source (AF) into the target total column (last_day+1),
-    and rewrite references from AF -> target total column.
-    DOES NOT touch the header cell (avoids merged-cell write error).
-    """
-    src_letter = get_column_letter(SOURCE_TOTAL_COL)   # "AF"
-    tgt_letter = get_column_letter(target_total_col)   # e.g. "Y"/"AA"/...
+    # Row ranges we want Total to exist on (same as blocks we copy)
+    row_from, row_to = TOTAL_COPY_ROWS
 
     for r in range(row_from, row_to + 1):
-        src_cell = ws_src.cell(row=r, column=SOURCE_TOTAL_COL)
-        dst_cell = ws_dst.cell(row=r, column=target_total_col)
-
-        v = src_cell.value
-        if isinstance(v, str) and v.startswith("="):
-            v = rewrite_total_formula(v, src_letter, tgt_letter)
-
-        dst_cell.value = v
-        dst_cell.number_format = "General"
+        # Example: =SUM(E32:W32)
+        ws_dst[f"{total_letter}{r}"].value = f"=SUM({start_letter}{r}:{last_letter}{r})"
+        ws_dst[f"{total_letter}{r}"].number_format = "General"
 
 def force_recalc_on_open(wb: openpyxl.Workbook):
     if wb.calculation is None:
@@ -240,18 +233,20 @@ if st.button("✅ Apply and generate ZIP"):
                     # 1) Detect last day column in target (E..AE)
                     last_day_col = find_last_day_col(ws_dst)
 
-                    # 2) Copy day blocks from source template up to last_day_col
+                    # 2) Copy day blocks from source template up to last_day_col (NOT to AE)
                     for (r1, r2) in COPY_BLOCKS:
                         copy_block(ws_src, ws_dst, r1, r2, START_COL, last_day_col)
 
-                    # 3) Copy Total formulas from source (AF) to target (last_day_col + 1) WITHOUT writing header
+                    # 3) Total column is right after last day column
                     target_total_col = last_day_col + 1
-                    copy_total_column(ws_src, ws_dst, target_total_col, row_from=TOTAL_COPY_ROWS[0], row_to=TOTAL_COPY_ROWS[1])
 
-                    # 4) Apply mapping only on day columns E..last_day_col
+                    # 4) Write TOTAL formulas dynamically (E..last day), no need to touch "Total" header (merged)
+                    copy_total_formula_dynamic(ws_dst, target_total_col, last_day_col)
+
+                    # 5) Apply mapping only on day columns E..last_day_col
                     apply_mapping_formulas(ws_dst, mapping, end_day_col=last_day_col)
 
-                    # 5) Force recalc
+                    # 6) Force recalc
                     force_recalc_on_open(wb_dst)
 
                     # Save
