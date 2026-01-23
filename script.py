@@ -7,7 +7,6 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.datetime import from_excel
 from openpyxl.workbook.properties import CalcProperties
-import re
 from pathlib import Path
 
 st.set_page_config(page_title="POP files", layout="centered")
@@ -45,14 +44,16 @@ HEADER_ROW_2025 = 3
 
 START_COL = 5         # E
 MAX_DAY_COL = 31      # AE (max search range for dates)
-SOURCE_TOTAL_COL = 32 # AF (Total column in source)
 
+# Copy blocks (rows) - dynamic columns will be used
 COPY_BLOCKS = [
     (32, 48),
     (58, 72),
 ]
 
-TOTAL_COPY_ROWS = (32, 72)
+# Total column should exist ONLY until row 48 (your rule)
+TOTAL_ROW_FROM = 32
+TOTAL_ROW_TO   = 48
 
 # -------------------------
 # Helpers
@@ -131,9 +132,6 @@ def read_mapping(file_bytes: bytes):
     return mapping
 
 def find_last_day_col(ws):
-    """
-    Find the last column (E..AE) that contains a readable date in row 31.
-    """
     last = None
     for c in range(START_COL, MAX_DAY_COL + 1):
         d = cell_to_date(ws.cell(row=HEADER_ROW_2026, column=c), default_year=2026)
@@ -175,20 +173,16 @@ def apply_mapping_formulas(ws, mapping, end_day_col):
             f'{S}23*(1+$N$52)+{S}24*(1+$K$52))'
         )
 
-def copy_total_formula_dynamic(ws_dst, total_col, last_day_col):
+def write_total_sum(ws_dst, total_col, last_day_col):
     """
-    Build Total formula that aggregates ONLY E..last_day_col for each row.
-    Uses SUM for numeric rows.
+    Total column exists ONLY from TOTAL_ROW_FROM to TOTAL_ROW_TO.
+    Formula sums E..last_day_col for each row.
     """
     total_letter = get_column_letter(total_col)
     start_letter = get_column_letter(START_COL)
     last_letter  = get_column_letter(last_day_col)
 
-    # Row ranges we want Total to exist on (same as blocks we copy)
-    row_from, row_to = TOTAL_COPY_ROWS
-
-    for r in range(row_from, row_to + 1):
-        # Example: =SUM(E32:W32)
+    for r in range(TOTAL_ROW_FROM, TOTAL_ROW_TO + 1):
         ws_dst[f"{total_letter}{r}"].value = f"=SUM({start_letter}{r}:{last_letter}{r})"
         ws_dst[f"{total_letter}{r}"].number_format = "General"
 
@@ -233,15 +227,15 @@ if st.button("✅ Apply and generate ZIP"):
                     # 1) Detect last day column in target (E..AE)
                     last_day_col = find_last_day_col(ws_dst)
 
-                    # 2) Copy day blocks from source template up to last_day_col (NOT to AE)
+                    # 2) Copy day blocks from source template up to last_day_col
                     for (r1, r2) in COPY_BLOCKS:
                         copy_block(ws_src, ws_dst, r1, r2, START_COL, last_day_col)
 
                     # 3) Total column is right after last day column
                     target_total_col = last_day_col + 1
 
-                    # 4) Write TOTAL formulas dynamically (E..last day), no need to touch "Total" header (merged)
-                    copy_total_formula_dynamic(ws_dst, target_total_col, last_day_col)
+                    # 4) Write TOTAL formulas only until row 48
+                    write_total_sum(ws_dst, target_total_col, last_day_col)
 
                     # 5) Apply mapping only on day columns E..last_day_col
                     apply_mapping_formulas(ws_dst, mapping, end_day_col=last_day_col)
