@@ -22,66 +22,53 @@ L’application :
 """)
 
 # -------------------------
-# Uploads
+# Uploads (local bundled files)
 # -------------------------
-
 MAPPING_PATH = Path("Calendrier_comparatif_2026_vs_2025.xlsx")
 mapping_file = BytesIO(MAPPING_PATH.read_bytes())
 mapping_file.name = MAPPING_PATH.name
 
-source_PATH = Path("Book2.xlsx")
-source_file = BytesIO(source_PATH.read_bytes())
-source_file.name = source_PATH.name
+SOURCE_PATH = Path("Book2.xlsx")  # <-- your NEW "max" source template (E..AE days, AF Total)
+source_file = BytesIO(SOURCE_PATH.read_bytes())
+source_file.name = SOURCE_PATH.name
 
-target_files = st.file_uploader("Deposer ici les fichers POP",type=["xlsx"],accept_multiple_files=True)
+target_files = st.file_uploader("Deposer ici les fichers POP", type=["xlsx"], accept_multiple_files=True)
 
-# ✅ Show how many target files were uploaded
 if target_files:
     st.info(f"📦 {len(target_files)} file(s) uploaded.")
 
 # -------------------------
 # Config (your rules)
 # -------------------------
-RANGES_TO_COPY = ["E32:AE48", "E58:AE72"]
 HEADER_ROW_2026 = 31
 HEADER_ROW_2025 = 3
-START_COL = 5     # E
-END_COL   = 31    # AE
+
+# Where "Total" label is in the target (header row)
+TOTAL_HEADER_ROW = 30
+
+# Day columns in the MAX source template
+START_COL = 5      # E
+MAX_DAY_COL = 31   # AE  (max day columns)
+SOURCE_TOTAL_COL = 32  # AF (Total column in the source template)
+
+# Blocks to copy (rows) - dynamic columns will be used
+COPY_BLOCKS = [
+    (32, 48),
+    (58, 72),
+]
+
+# Rows where we rewrite formulas with mapping (only on day columns)
+MAPPING_ROWS = (35, 41, 47)
 
 # -------------------------
-# Helpers (range copy)
+# Helpers (range + copy)
 # -------------------------
-def col_to_num(col: str) -> int:
-    col = col.upper()
-    n = 0
-    for c in col:
-        n = n * 26 + (ord(c) - ord("A") + 1)
-    return n
-
-def parse_range(a1_range: str):
-    m = re.fullmatch(r"\s*([A-Za-z]+)(\d+)\s*:\s*([A-Za-z]+)(\d+)\s*", a1_range)
-    if not m:
-        raise ValueError(f"Invalid range '{a1_range}'. Use format like E32:AE48")
-    c1, r1, c2, r2 = m.group(1), m.group(2), m.group(3), m.group(4)
-    row1, row2 = int(r1), int(r2)
-    col1, col2 = col_to_num(c1), col_to_num(c2)
-    if row2 < row1 or col2 < col1:
-        raise ValueError(f"Range '{a1_range}' must end bottom-right of the start")
-    return row1, col1, row2, col2
-
-def copy_range(ws_src, ws_dst, a1_range: str):
-    row1, col1, row2, col2 = parse_range(a1_range)
-    for row in range(row1, row2 + 1):
-        for col in range(col1, col2 + 1):
-            src_cell = ws_src.cell(row=row, column=col)
+def copy_block(ws_src, ws_dst, r1, r2, c1, c2):
+    for row in range(r1, r2 + 1):
+        for col in range(c1, c2 + 1):
             dst_cell = ws_dst.cell(row=row, column=col)
-
-            
-            dst_cell.value = src_cell.value
-
-            
-            dst_cell.number_format = "General"
-
+            dst_cell.value = ws_src.cell(row=row, column=col).value
+            dst_cell.number_format = "General"  # avoid formulas-as-text
 
 # -------------------------
 # Helpers (date parsing + mapping)
@@ -152,17 +139,33 @@ def read_mapping(file_bytes: bytes):
             mapping[d26] = d25
     return mapping
 
-def build_date_to_col(ws, header_row, default_year=None):
+def find_last_day_col(ws):
+    """
+    Find the last column (E..AE) that contains a readable date in row 31.
+    """
+    last = None
+    for c in range(START_COL, MAX_DAY_COL + 1):
+        d = cell_to_date(ws.cell(row=HEADER_ROW_2026, column=c), default_year=2026)
+        if d:
+            last = c
+    if last is None:
+        raise ValueError(f"No 2026 date found in row {HEADER_ROW_2026} between E and AE.")
+    return last
+
+def build_date_to_col(ws, header_row, end_col, default_year=None):
     result = {}
-    for c in range(START_COL, END_COL + 1):
+    for c in range(START_COL, end_col + 1):
         d = cell_to_date(ws.cell(row=header_row, column=c), default_year=default_year)
         if d:
             result[d] = c
     return result
 
-def apply_mapping_formulas(ws, mapping):
-    col_2026 = build_date_to_col(ws, HEADER_ROW_2026, default_year=2026)
-    col_2025 = build_date_to_col(ws, HEADER_ROW_2025, default_year=2025)
+def apply_mapping_formulas(ws, mapping, end_day_col):
+    """
+    Apply mapping formulas only on day columns E..end_day_col (NOT Total column).
+    """
+    col_2026 = build_date_to_col(ws, HEADER_ROW_2026, end_day_col, default_year=2026)
+    col_2025 = build_date_to_col(ws, HEADER_ROW_2025, end_day_col, default_year=2025)
 
     for d26, d25 in mapping.items():
         if d26 not in col_2026 or d25 not in col_2025:
@@ -174,7 +177,7 @@ def apply_mapping_formulas(ws, mapping):
         T = get_column_letter(tgt_col)
         S = get_column_letter(src_col)
 
-        # IMPORTANT: use commas in file formulas
+        # IMPORTANT: use commas in file formulas (not semicolons)
         ws[f"{T}35"].value = (
             f'=IF({S}6*(1+$E$52)+{S}7*(1+$H$52)=0,0,'
             f'{S}6*(1+$E$52)+{S}7*(1+$H$52))'
@@ -185,6 +188,38 @@ def apply_mapping_formulas(ws, mapping):
             f'{S}23*(1+$N$52)+{S}24*(1+$K$52))'
         )
 
+def rewrite_total_formula(formula: str, source_total_letter: str, target_total_letter: str) -> str:
+    """
+    Replace all references to the source Total column (e.g. AF) with the target Total column (e.g. Y/AA/...).
+    Handles AF32, AF$32, $AF32, $AF$32
+    """
+    if not isinstance(formula, str) or not formula.startswith("="):
+        return formula
+    pat = re.compile(rf'(\$?){source_total_letter}(\$?\d+)')
+    return pat.sub(rf'\1{target_total_letter}\2', formula)
+
+def copy_total_column(ws_src, ws_dst, target_total_col, row_from, row_to):
+    """
+    Copy the Total column from source (AF) into the target total column (last_day+1),
+    and rewrite formulas that reference AF to reference the actual total column.
+    """
+    src_total_letter = get_column_letter(SOURCE_TOTAL_COL)   # "AF"
+    tgt_total_letter = get_column_letter(target_total_col)   # e.g. "Y" / "AA" / ...
+
+    # Write header label
+    ws_dst.cell(row=TOTAL_HEADER_ROW, column=target_total_col).value = "Total"
+
+    for r in range(row_from, row_to + 1):
+        src_cell = ws_src.cell(row=r, column=SOURCE_TOTAL_COL)
+        dst_cell = ws_dst.cell(row=r, column=target_total_col)
+
+        v = src_cell.value
+        if isinstance(v, str) and v.startswith("="):
+            v = rewrite_total_formula(v, src_total_letter, tgt_total_letter)
+
+        dst_cell.value = v
+        dst_cell.number_format = "General"
+
 def force_recalc_on_open(wb: openpyxl.Workbook):
     if wb.calculation is None:
         wb.calculation = CalcProperties(fullCalcOnLoad=True)
@@ -194,15 +229,14 @@ def force_recalc_on_open(wb: openpyxl.Workbook):
 # -------------------------
 # Main action
 # -------------------------
-ready = mapping_file and source_file and target_files and len(target_files) > 0
+ready = target_files and len(target_files) > 0
 if not ready:
-    st.caption("Upload  at least 1 pop file.")
+    st.caption("Upload at least 1 pop file.")
     st.stop()
 
 if st.button("✅ Apply and generate ZIP"):
     n_files = len(target_files)
 
-    # ✅ Waiting widget
     with st.spinner(f"Processing {n_files} file(s)..."):
         try:
             mapping = read_mapping(mapping_file.getvalue())
@@ -224,12 +258,24 @@ if st.button("✅ Apply and generate ZIP"):
                     wb_dst = openpyxl.load_workbook(BytesIO(up.getvalue()), data_only=False)
                     ws_dst = wb_dst[wb_dst.sheetnames[0]]
 
-                    for r in RANGES_TO_COPY:
-                        copy_range(ws_src, ws_dst, r)
+                    # 1) Detect last day column in target (E..AE)
+                    last_day_col = find_last_day_col(ws_dst)
 
-                    apply_mapping_formulas(ws_dst, mapping)
+                    # 2) Copy day blocks from source template up to last_day_col
+                    for (r1, r2) in COPY_BLOCKS:
+                        copy_block(ws_src, ws_dst, r1, r2, START_COL, last_day_col)
+
+                    # 3) Copy Total column from source (AF) to target at (last_day_col + 1)
+                    target_total_col = last_day_col + 1
+                    copy_total_column(ws_src, ws_dst, target_total_col, row_from=32, row_to=72)
+
+                    # 4) Apply mapping only on day columns E..last_day_col
+                    apply_mapping_formulas(ws_dst, mapping, end_day_col=last_day_col)
+
+                    # 5) Force recalc
                     force_recalc_on_open(wb_dst)
 
+                    # Save
                     out = BytesIO()
                     wb_dst.save(out)
                     file_bytes = out.getvalue()
@@ -239,38 +285,7 @@ if st.button("✅ Apply and generate ZIP"):
                     zf.writestr(zip_name, file_bytes)
 
                     updated_count += 1
-
-                    # ✅ update progress bar
                     progress.progress(updated_count / total)
-
-
-            # zip_buffer = BytesIO()
-            # updated_count = 0
-
-            # with ZipFile(zip_buffer, "w", compression=ZIP_DEFLATED) as zf:
-            #     for up in target_files:
-            #         wb_dst = openpyxl.load_workbook(BytesIO(up.getvalue()), data_only=False)
-            #         ws_dst = wb_dst[wb_dst.sheetnames[0]]
-
-            #         # 1) Copy formula ranges
-            #         for r in RANGES_TO_COPY:
-            #             copy_range(ws_src, ws_dst, r)
-
-            #         # 2) Apply mapping formulas
-            #         apply_mapping_formulas(ws_dst, mapping)
-
-            #         # 3) Force recalc
-            #         force_recalc_on_open(wb_dst)
-
-            #         out = BytesIO()
-            #         wb_dst.save(out)
-            #         file_bytes = out.getvalue()
-
-            #         original_name = up.name.rsplit(".", 1)[0]
-            #         zip_name = f"{original_name}_updated.xlsx"
-            #         zf.writestr(zip_name, file_bytes)
-
-            #         updated_count += 1
 
             zip_buffer.seek(0)
 
@@ -278,7 +293,6 @@ if st.button("✅ Apply and generate ZIP"):
             st.error(f"Error: {e}")
             st.stop()
 
-    # ✅ Finished message
     st.success(f"✅ All done — {updated_count}/{n_files} file(s) updated.")
 
     st.download_button(
