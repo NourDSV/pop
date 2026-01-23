@@ -7,6 +7,7 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.datetime import from_excel
 from openpyxl.workbook.properties import CalcProperties
+import re
 from pathlib import Path
 
 st.set_page_config(page_title="POP files", layout="centered")
@@ -27,7 +28,7 @@ MAPPING_PATH = Path("Calendrier_comparatif_2026_vs_2025.xlsx")
 mapping_file = BytesIO(MAPPING_PATH.read_bytes())
 mapping_file.name = MAPPING_PATH.name
 
-SOURCE_PATH = Path("Book2.xlsx")  # max source template (E..AE days, AF Total)
+SOURCE_PATH = Path("Book2.xlsx")  # source template: E..AE days, AF Total formulas
 source_file = BytesIO(SOURCE_PATH.read_bytes())
 source_file.name = SOURCE_PATH.name
 
@@ -42,18 +43,20 @@ if target_files:
 HEADER_ROW_2026 = 31
 HEADER_ROW_2025 = 3
 
-START_COL = 5         # E
-MAX_DAY_COL = 31      # AE (max search range for dates)
+START_COL = 5          # E
+MAX_DAY_COL = 31       # AE (max search range for dates in row 31)
+SOURCE_TOTAL_COL = 32  # AF (Total column in source template)
 
-# Copy blocks (rows) - dynamic columns will be used
+# Copy blocks: copy formulas for days only (E..last_day_col)
 COPY_BLOCKS = [
     (32, 48),
     (58, 72),
 ]
 
-# Total column should exist ONLY until row 48 (your rule)
+# Total column is only relevant until row 48 (per your rule)
 TOTAL_ROW_FROM = 32
 TOTAL_ROW_TO   = 48
+
 
 # -------------------------
 # Helpers
@@ -63,7 +66,8 @@ def copy_block(ws_src, ws_dst, r1, r2, c1, c2):
         for col in range(c1, c2 + 1):
             dst_cell = ws_dst.cell(row=row, column=col)
             dst_cell.value = ws_src.cell(row=row, column=col).value
-            dst_cell.number_format = "General"
+            dst_cell.number_format = "General"  # avoid formulas-as-text
+
 
 def cell_to_date(cell, default_year=None):
     v = cell.value
@@ -99,6 +103,7 @@ def cell_to_date(cell, default_year=None):
 
     return None
 
+
 def norm_full_date(v):
     if v is None:
         return None
@@ -120,6 +125,7 @@ def norm_full_date(v):
             return None
     return None
 
+
 def read_mapping(file_bytes: bytes):
     wb = openpyxl.load_workbook(BytesIO(file_bytes), data_only=True)
     ws = wb.active
@@ -131,7 +137,11 @@ def read_mapping(file_bytes: bytes):
             mapping[d26] = d25
     return mapping
 
+
 def find_last_day_col(ws):
+    """
+    Find the last column (E..AE) that contains a readable date in row 31.
+    """
     last = None
     for c in range(START_COL, MAX_DAY_COL + 1):
         d = cell_to_date(ws.cell(row=HEADER_ROW_2026, column=c), default_year=2026)
@@ -141,6 +151,7 @@ def find_last_day_col(ws):
         raise ValueError(f"No 2026 date found in row {HEADER_ROW_2026} between E and AE.")
     return last
 
+
 def build_date_to_col(ws, header_row, end_col, default_year=None):
     result = {}
     for c in range(START_COL, end_col + 1):
@@ -149,7 +160,11 @@ def build_date_to_col(ws, header_row, end_col, default_year=None):
             result[d] = c
     return result
 
+
 def apply_mapping_formulas(ws, mapping, end_day_col):
+    """
+    Apply mapping formulas only on day columns E..end_day_col (NOT Total col).
+    """
     col_2026 = build_date_to_col(ws, HEADER_ROW_2026, end_day_col, default_year=2026)
     col_2025 = build_date_to_col(ws, HEADER_ROW_2025, end_day_col, default_year=2025)
 
@@ -163,6 +178,7 @@ def apply_mapping_formulas(ws, mapping, end_day_col):
         T = get_column_letter(tgt_col)
         S = get_column_letter(src_col)
 
+        # IMPORTANT: commas in stored formulas
         ws[f"{T}35"].value = (
             f'=IF({S}6*(1+$E$52)+{S}7*(1+$H$52)=0,0,'
             f'{S}6*(1+$E$52)+{S}7*(1+$H$52))'
@@ -173,24 +189,88 @@ def apply_mapping_formulas(ws, mapping, end_day_col):
             f'{S}23*(1+$N$52)+{S}24*(1+$K$52))'
         )
 
-def write_total_sum(ws_dst, total_col, last_day_col):
+
+# -------- TOTAL column rewriting (the key fix) --------
+
+def col_letter_to_num(col: str) -> int:
+    col = col.upper()
+    n = 0
+    for ch in col:
+        n = n * 26 + (ord(ch) - ord("A") + 1)
+    return n
+
+def num_to_col_letter(n: int) -> str:
+    return get_column_letter(n)
+
+def replace_range_end_columns(formula: str, old_end_letters: set[str], new_end_letter: str) -> str:
     """
-    Total column exists ONLY from TOTAL_ROW_FROM to TOTAL_ROW_TO.
-    Formula sums E..last_day_col for each row.
+    Replace range ends like  ...:AE32  or ...:$AE$32  with ...:<new_end_letter>32
+    Only when the END column is one of old_end_letters.
+    Keeps $ and row number as-is.
     """
-    total_letter = get_column_letter(total_col)
-    start_letter = get_column_letter(START_COL)
-    last_letter  = get_column_letter(last_day_col)
+    if not isinstance(formula, str) or not formula.startswith("="):
+        return formula
+
+    # pattern for a range end: :$?COL$?ROW
+    # group(1)= ":" , group(2)= optional "$", group(3)=COL, group(4)= optional "$", group(5)=ROW
+    pat = re.compile(r'(:)(\$?)([A-Z]{1,3})(\$?)(\d+)')
+
+    def repl(m):
+        colon, dol1, col, dol2, row = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
+        if col in old_end_letters:
+            return f"{colon}{dol1}{new_end_letter}{dol2}{row}"
+        return m.group(0)
+
+    return pat.sub(repl, formula)
+
+def replace_total_self_refs(formula: str, src_total_letter: str, tgt_total_letter: str) -> str:
+    """
+    If the Total formula refers to the Total column letter (AF) anywhere,
+    replace that column letter with the target total column letter.
+    Handles AF32, $AF$32, etc.
+    """
+    if not isinstance(formula, str) or not formula.startswith("="):
+        return formula
+    pat = re.compile(rf'(\$?){src_total_letter}(\$?\d+)')
+    return pat.sub(rf'\1{tgt_total_letter}\2', formula)
+
+def copy_total_column_from_source(ws_src, ws_dst, target_total_col, last_day_col):
+    """
+    Copy Total column values/formulas from source AF into target_total_col (rows 32..48),
+    while rewriting the formulas so their aggregation ends at last_day_col (not AE / not AF).
+    """
+    src_total_letter = get_column_letter(SOURCE_TOTAL_COL)  # "AF"
+    tgt_total_letter = get_column_letter(target_total_col)  # e.g. "Y" / "AA" / ...
+
+    last_day_letter = get_column_letter(last_day_col)
+    max_day_letter  = get_column_letter(MAX_DAY_COL)        # "AE"
+
+    # In your template, range ends might be AE (max day) or AF (if template used it by mistake)
+    old_end_letters = {max_day_letter, src_total_letter}
 
     for r in range(TOTAL_ROW_FROM, TOTAL_ROW_TO + 1):
-        ws_dst[f"{total_letter}{r}"].value = f"=SUM({start_letter}{r}:{last_letter}{r})"
-        ws_dst[f"{total_letter}{r}"].number_format = "General"
+        src_cell = ws_src.cell(row=r, column=SOURCE_TOTAL_COL)
+        dst_cell = ws_dst.cell(row=r, column=target_total_col)
+
+        v = src_cell.value
+
+        # rewrite formulas
+        if isinstance(v, str) and v.startswith("="):
+            # 1) ensure any end-of-range column becomes last_day_letter
+            v = replace_range_end_columns(v, old_end_letters=old_end_letters, new_end_letter=last_day_letter)
+            # 2) if formula references AF as a column (self refs), move to target total col letter
+            v = replace_total_self_refs(v, src_total_letter=src_total_letter, tgt_total_letter=tgt_total_letter)
+
+        dst_cell.value = v
+        dst_cell.number_format = "General"
+
 
 def force_recalc_on_open(wb: openpyxl.Workbook):
     if wb.calculation is None:
         wb.calculation = CalcProperties(fullCalcOnLoad=True)
     else:
         wb.calculation.fullCalcOnLoad = True
+
 
 # -------------------------
 # Main action
@@ -231,13 +311,13 @@ if st.button("✅ Apply and generate ZIP"):
                     for (r1, r2) in COPY_BLOCKS:
                         copy_block(ws_src, ws_dst, r1, r2, START_COL, last_day_col)
 
-                    # 3) Total column is right after last day column
+                    # 3) Total column is right after the last day column
                     target_total_col = last_day_col + 1
 
-                    # 4) Write TOTAL formulas only until row 48
-                    write_total_sum(ws_dst, target_total_col, last_day_col)
+                    # 4) Copy Total column from source AF -> target_total_col, but rewrite ranges to end at last_day_col
+                    copy_total_column_from_source(ws_src, ws_dst, target_total_col, last_day_col)
 
-                    # 5) Apply mapping only on day columns E..last_day_col
+                    # 5) Apply mapping formulas only on day columns E..last_day_col
                     apply_mapping_formulas(ws_dst, mapping, end_day_col=last_day_col)
 
                     # 6) Force recalc
