@@ -28,7 +28,7 @@ MAPPING_PATH = Path("Calendrier_comparatif_2026_vs_2025.xlsx")
 mapping_file = BytesIO(MAPPING_PATH.read_bytes())
 mapping_file.name = MAPPING_PATH.name
 
-SOURCE_PATH = Path("Book2.xlsx")  # <-- your NEW "max" source template (E..AE days, AF Total)
+SOURCE_PATH = Path("Book2.xlsx")  # max source template (E..AE days, AF Total)
 source_file = BytesIO(SOURCE_PATH.read_bytes())
 source_file.name = SOURCE_PATH.name
 
@@ -38,41 +38,33 @@ if target_files:
     st.info(f"📦 {len(target_files)} file(s) uploaded.")
 
 # -------------------------
-# Config (your rules)
+# Config
 # -------------------------
 HEADER_ROW_2026 = 31
 HEADER_ROW_2025 = 3
 
-# Where "Total" label is in the target (header row)
-TOTAL_HEADER_ROW = 30
-
-# Day columns in the MAX source template
 START_COL = 5      # E
-MAX_DAY_COL = 31   # AE  (max day columns)
-SOURCE_TOTAL_COL = 32  # AF (Total column in the source template)
+MAX_DAY_COL = 31   # AE
+SOURCE_TOTAL_COL = 32  # AF in source
 
-# Blocks to copy (rows) - dynamic columns will be used
 COPY_BLOCKS = [
     (32, 48),
     (58, 72),
 ]
 
-# Rows where we rewrite formulas with mapping (only on day columns)
-MAPPING_ROWS = (35, 41, 47)
+# Total column formulas to copy (same rows as the copied blocks)
+TOTAL_COPY_ROWS = (32, 72)
 
 # -------------------------
-# Helpers (range + copy)
+# Helpers
 # -------------------------
 def copy_block(ws_src, ws_dst, r1, r2, c1, c2):
     for row in range(r1, r2 + 1):
         for col in range(c1, c2 + 1):
             dst_cell = ws_dst.cell(row=row, column=col)
             dst_cell.value = ws_src.cell(row=row, column=col).value
-            dst_cell.number_format = "General"  # avoid formulas-as-text
+            dst_cell.number_format = "General"
 
-# -------------------------
-# Helpers (date parsing + mapping)
-# -------------------------
 def cell_to_date(cell, default_year=None):
     v = cell.value
     if v is None:
@@ -140,9 +132,6 @@ def read_mapping(file_bytes: bytes):
     return mapping
 
 def find_last_day_col(ws):
-    """
-    Find the last column (E..AE) that contains a readable date in row 31.
-    """
     last = None
     for c in range(START_COL, MAX_DAY_COL + 1):
         d = cell_to_date(ws.cell(row=HEADER_ROW_2026, column=c), default_year=2026)
@@ -161,9 +150,6 @@ def build_date_to_col(ws, header_row, end_col, default_year=None):
     return result
 
 def apply_mapping_formulas(ws, mapping, end_day_col):
-    """
-    Apply mapping formulas only on day columns E..end_day_col (NOT Total column).
-    """
     col_2026 = build_date_to_col(ws, HEADER_ROW_2026, end_day_col, default_year=2026)
     col_2025 = build_date_to_col(ws, HEADER_ROW_2025, end_day_col, default_year=2025)
 
@@ -177,7 +163,6 @@ def apply_mapping_formulas(ws, mapping, end_day_col):
         T = get_column_letter(tgt_col)
         S = get_column_letter(src_col)
 
-        # IMPORTANT: use commas in file formulas (not semicolons)
         ws[f"{T}35"].value = (
             f'=IF({S}6*(1+$E$52)+{S}7*(1+$H$52)=0,0,'
             f'{S}6*(1+$E$52)+{S}7*(1+$H$52))'
@@ -188,26 +173,20 @@ def apply_mapping_formulas(ws, mapping, end_day_col):
             f'{S}23*(1+$N$52)+{S}24*(1+$K$52))'
         )
 
-def rewrite_total_formula(formula: str, source_total_letter: str, target_total_letter: str) -> str:
-    """
-    Replace all references to the source Total column (e.g. AF) with the target Total column (e.g. Y/AA/...).
-    Handles AF32, AF$32, $AF32, $AF$32
-    """
+def rewrite_total_formula(formula: str, src_total_letter: str, tgt_total_letter: str) -> str:
     if not isinstance(formula, str) or not formula.startswith("="):
         return formula
-    pat = re.compile(rf'(\$?){source_total_letter}(\$?\d+)')
-    return pat.sub(rf'\1{target_total_letter}\2', formula)
+    pat = re.compile(rf'(\$?){src_total_letter}(\$?\d+)')
+    return pat.sub(rf'\1{tgt_total_letter}\2', formula)
 
 def copy_total_column(ws_src, ws_dst, target_total_col, row_from, row_to):
     """
-    Copy the Total column from source (AF) into the target total column (last_day+1),
-    and rewrite formulas that reference AF to reference the actual total column.
+    Copy Total formulas from source (AF) into the target total column (last_day+1),
+    and rewrite references from AF -> target total column.
+    DOES NOT touch the header cell (avoids merged-cell write error).
     """
-    src_total_letter = get_column_letter(SOURCE_TOTAL_COL)   # "AF"
-    tgt_total_letter = get_column_letter(target_total_col)   # e.g. "Y" / "AA" / ...
-
-    # Write header label
-    ws_dst.cell(row=TOTAL_HEADER_ROW, column=target_total_col).value = "Total"
+    src_letter = get_column_letter(SOURCE_TOTAL_COL)   # "AF"
+    tgt_letter = get_column_letter(target_total_col)   # e.g. "Y"/"AA"/...
 
     for r in range(row_from, row_to + 1):
         src_cell = ws_src.cell(row=r, column=SOURCE_TOTAL_COL)
@@ -215,7 +194,7 @@ def copy_total_column(ws_src, ws_dst, target_total_col, row_from, row_to):
 
         v = src_cell.value
         if isinstance(v, str) and v.startswith("="):
-            v = rewrite_total_formula(v, src_total_letter, tgt_total_letter)
+            v = rewrite_total_formula(v, src_letter, tgt_letter)
 
         dst_cell.value = v
         dst_cell.number_format = "General"
@@ -265,9 +244,9 @@ if st.button("✅ Apply and generate ZIP"):
                     for (r1, r2) in COPY_BLOCKS:
                         copy_block(ws_src, ws_dst, r1, r2, START_COL, last_day_col)
 
-                    # 3) Copy Total column from source (AF) to target at (last_day_col + 1)
+                    # 3) Copy Total formulas from source (AF) to target (last_day_col + 1) WITHOUT writing header
                     target_total_col = last_day_col + 1
-                    copy_total_column(ws_src, ws_dst, target_total_col, row_from=32, row_to=72)
+                    copy_total_column(ws_src, ws_dst, target_total_col, row_from=TOTAL_COPY_ROWS[0], row_to=TOTAL_COPY_ROWS[1])
 
                     # 4) Apply mapping only on day columns E..last_day_col
                     apply_mapping_formulas(ws_dst, mapping, end_day_col=last_day_col)
