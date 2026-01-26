@@ -9,6 +9,7 @@ from openpyxl.utils.datetime import from_excel
 from openpyxl.workbook.properties import CalcProperties
 import re
 from pathlib import Path
+from copy import copy
 
 st.set_page_config(page_title="POP files", layout="centered")
 st.title("Création des fichiers POP")
@@ -342,16 +343,26 @@ def hide_rows(ws, start_row, end_row):
     for r in range(start_row, end_row + 1):
         ws.row_dimensions[r].hidden = True
 
-def force_two_decimals(ws, start_col, end_col, row_from=32, row_to=48):
+
+
+def force_two_decimals_keep_style(ws, start_col, end_col, row_from=32, row_to=48):
+    """
+    Force 2 decimal display while preserving fill, font, borders, alignment, etc.
+    """
     for r in range(row_from, row_to + 1):
         for c in range(start_col, end_col + 1):
             cell = ws.cell(row=r, column=c)
 
-            # 🔥 Reset any existing style
-            cell.style = "Normal"
+            # Copy existing style parts
+            cell.font = copy(cell.font)
+            cell.fill = copy(cell.fill)
+            cell.border = copy(cell.border)
+            cell.alignment = copy(cell.alignment)
+            cell.protection = copy(cell.protection)
 
-            # ✅ Apply strict 2-decimal format
+            # ✅ Override ONLY the number format
             cell.number_format = "0.00"
+
 
 
 
@@ -422,7 +433,7 @@ if st.button("✅ Apply and generate ZIP"):
                     # Hide rows 2 to 25
                     hide_rows(ws_dst, 2, 25)
 
-                    force_two_decimals(ws_dst, START_COL, last_day_col, 32, 48)
+                    force_two_decimals_keep_style(ws_dst, START_COL, last_day_col, 32, 48)
 
 
                     # 6) Force recalc
