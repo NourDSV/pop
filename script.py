@@ -342,14 +342,11 @@ def hide_rows(ws, start_row, end_row):
     for r in range(start_row, end_row + 1):
         ws.row_dimensions[r].hidden = True
 
-def format_two_decimals(ws):
-    """
-    Apply 2-decimal numeric format to the entire worksheet.
-    """
-    for row in ws.iter_rows():
-        for cell in row:
-            if isinstance(cell.value, (int, float)):
-                cell.number_format = "0.00"
+def format_two_decimals_E32_E48(ws):
+    for r in range(32, 49):
+        cell = ws.cell(row=r, column=5)  # E
+        cell.number_format = "0.00"
+
 
 
 def force_recalc_on_open(wb: openpyxl.Workbook):
@@ -418,7 +415,7 @@ if st.button("✅ Apply and generate ZIP"):
                     # Hide rows 2 to 25
                     hide_rows(ws_dst, 2, 25)
 
-                    format_two_decimals(ws_dst)
+                    format_two_decimals_E32_E48(ws_dst)
 
 
                     # 6) Force recalc
