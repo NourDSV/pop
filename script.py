@@ -335,6 +335,14 @@ def clear_after_last_day(ws, last_day_col, start_row=75):
             cell.value = None
             cell.number_format = "General"
 
+def hide_rows(ws, start_row, end_row):
+    """
+    Hide rows from start_row to end_row (inclusive).
+    """
+    for r in range(start_row, end_row + 1):
+        ws.row_dimensions[r].hidden = True
+
+
 
 def force_recalc_on_open(wb: openpyxl.Workbook):
     if wb.calculation is None:
@@ -398,6 +406,10 @@ if st.button("✅ Apply and generate ZIP"):
 
                     # Clean everything after last day column from row 75
                     clear_after_last_day(ws_dst, last_day_col, start_row=75)
+
+                    # Hide rows 2 to 25
+                    hide_rows(ws_dst, 2, 25)
+
 
                     # 6) Force recalc
                     force_recalc_on_open(wb_dst)
