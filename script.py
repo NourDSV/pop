@@ -245,7 +245,7 @@ def apply_V_PROD_CAM_DISTRI_formula(ws, start_col, end_col):
         cell = ws.cell(row=38, column=c)
         cell.value = formula
         cell.number_format = "General"
-        
+
 
 
 # -------- TOTAL column rewriting (the key fix) --------
@@ -322,6 +322,19 @@ def copy_total_column_from_source(ws_src, ws_dst, target_total_col, last_day_col
         dst_cell.value = v
         dst_cell.number_format = "General"
 
+def clear_after_last_day(ws, last_day_col, start_row=75):
+    """
+    Clear all cells AFTER last_day_col, starting from start_row.
+    """
+    max_row = ws.max_row
+    max_col = ws.max_column
+
+    for r in range(start_row, max_row + 1):
+        for c in range(last_day_col + 1, max_col + 1):
+            cell = ws.cell(row=r, column=c)
+            cell.value = None
+            cell.number_format = "General"
+
 
 def force_recalc_on_open(wb: openpyxl.Workbook):
     if wb.calculation is None:
@@ -383,6 +396,8 @@ if st.button("✅ Apply and generate ZIP"):
                     apply_prod_cam_total_formula(ws_dst, START_COL, last_day_col)
                     apply_V_PROD_CAM_DISTRI_formula(ws_dst, START_COL, last_day_col)
 
+                    # Clean everything after last day column from row 75
+                    clear_after_last_day(ws_dst, last_day_col, start_row=75)
 
                     # 6) Force recalc
                     force_recalc_on_open(wb_dst)
