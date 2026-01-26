@@ -245,6 +245,7 @@ def apply_V_PROD_CAM_DISTRI_formula(ws, start_col, end_col):
         cell = ws.cell(row=38, column=c)
         cell.value = formula
         cell.number_format = "General"
+        
 
 
 # -------- TOTAL column rewriting (the key fix) --------
