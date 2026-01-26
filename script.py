@@ -189,6 +189,33 @@ def apply_mapping_formulas(ws, mapping, end_day_col):
             f'{S}23*(1+$N$52)+{S}24*(1+$K$52))'
         )
 
+def find_header_column(ws, header_name, header_row=2, start_col=1, max_col=200):
+    """
+    Find the column index where row `header_row` equals header_name (exact match, stripped).
+    """
+    for c in range(start_col, min(max_col, ws.max_column) + 1):
+        v = ws.cell(row=header_row, column=c).value
+        if v is None:
+            continue
+        if str(v).strip() == header_name:
+            return c
+    raise ValueError(f"Header '{header_name}' not found in row {header_row}")
+
+def apply_v_prod_quai_formula(ws, start_col, end_col):
+    """
+    Row 44 formula: =$<V_PROD_QUAI_COL>$3
+    Applied from start_col to end_col.
+    """
+    v_prod_col = find_header_column(ws, "V_PROD_QUAI", header_row=2)
+    v_prod_letter = get_column_letter(v_prod_col)
+
+    formula = f"=${v_prod_letter}$3"
+
+    for c in range(start_col, end_col + 1):
+        cell = ws.cell(row=44, column=c)
+        cell.value = formula
+        cell.number_format = "General"
+
 
 # -------- TOTAL column rewriting (the key fix) --------
 
@@ -319,6 +346,10 @@ if st.button("✅ Apply and generate ZIP"):
 
                     # 5) Apply mapping formulas only on day columns E..last_day_col
                     apply_mapping_formulas(ws_dst, mapping, end_day_col=last_day_col)
+
+                    # After apply_mapping_formulas(...)
+                    apply_v_prod_quai_formula(ws_dst, START_COL, last_day_col)
+
 
                     # 6) Force recalc
                     force_recalc_on_open(wb_dst)
