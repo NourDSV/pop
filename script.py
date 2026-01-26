@@ -342,10 +342,17 @@ def hide_rows(ws, start_row, end_row):
     for r in range(start_row, end_row + 1):
         ws.row_dimensions[r].hidden = True
 
-def format_two_decimals_E32_E48(ws):
-    for r in range(32, 49):
-        cell = ws.cell(row=r, column=5)  # E
-        cell.number_format = "0.00"
+def force_two_decimals(ws, start_col, end_col, row_from=32, row_to=48):
+    for r in range(row_from, row_to + 1):
+        for c in range(start_col, end_col + 1):
+            cell = ws.cell(row=r, column=c)
+
+            # 🔥 Reset any existing style
+            cell.style = "Normal"
+
+            # ✅ Apply strict 2-decimal format
+            cell.number_format = "0.00"
+
 
 
 
@@ -415,7 +422,7 @@ if st.button("✅ Apply and generate ZIP"):
                     # Hide rows 2 to 25
                     hide_rows(ws_dst, 2, 25)
 
-                    format_two_decimals_E32_E48(ws_dst)
+                    force_two_decimals(ws_dst, START_COL, last_day_col, 32, 48)
 
 
                     # 6) Force recalc
