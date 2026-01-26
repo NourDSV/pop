@@ -216,6 +216,36 @@ def apply_v_prod_quai_formula(ws, start_col, end_col):
         cell.value = formula
         cell.number_format = "General"
 
+def apply_prod_cam_total_formula(ws, start_col, end_col):
+    """
+    Row 32 formula: =$<PROD_CAM_TOTAL_COL>$3
+    Applied from start_col to end_col.
+    """
+    prod_cam_col = find_header_column(ws, "PROD CAM TOTAL", header_row=2)
+    prod_cam_letter = get_column_letter(prod_cam_col)
+
+    formula = f"=${prod_cam_letter}$3"
+
+    for c in range(start_col, end_col + 1):
+        cell = ws.cell(row=32, column=c)
+        cell.value = formula
+        cell.number_format = "General"
+
+def apply_V_PROD_CAM_DISTRI_formula(ws, start_col, end_col):
+    """
+    Row 38 formula: =$<PROD_CAM_TOTAL_COL>$3
+    Applied from start_col to end_col.
+    """
+    prod_cam_col = find_header_column(ws, "V_PROD_CAM_DISTRI", header_row=2)
+    prod_cam_letter = get_column_letter(prod_cam_col)
+
+    formula = f"=${prod_cam_letter}$3"
+
+    for c in range(start_col, end_col + 1):
+        cell = ws.cell(row=38, column=c)
+        cell.value = formula
+        cell.number_format = "General"
+
 
 # -------- TOTAL column rewriting (the key fix) --------
 
@@ -349,6 +379,8 @@ if st.button("✅ Apply and generate ZIP"):
 
                     # After apply_mapping_formulas(...)
                     apply_v_prod_quai_formula(ws_dst, START_COL, last_day_col)
+                    apply_prod_cam_total_formula(ws_dst, START_COL, last_day_col)
+                    apply_V_PROD_CAM_DISTRI_formula(ws_dst, START_COL, last_day_col)
 
 
                     # 6) Force recalc
