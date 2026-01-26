@@ -433,7 +433,7 @@ if st.button("✅ Apply and generate ZIP"):
                     # Hide rows 2 to 25
                     hide_rows(ws_dst, 2, 25)
 
-                    force_two_decimals_keep_style(ws_dst, START_COL, last_day_col, 32, 48)
+                    force_two_decimals_keep_style(ws_dst, START_COL, last_day_col+1, 32, 48)
 
 
                     # 6) Force recalc
