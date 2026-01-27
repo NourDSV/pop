@@ -10,6 +10,7 @@ from openpyxl.workbook.properties import CalcProperties
 import re
 from pathlib import Path
 from copy import copy
+from openpyxl.styles import Alignment
 
 st.set_page_config(page_title="POP files", layout="centered")
 st.title("Création des fichiers POP")
@@ -365,6 +366,25 @@ def force_two_decimals_keep_style(ws, start_col, end_col, row_from=32, row_to=48
 
 
 
+def center_align_block(ws, start_col, end_col, row_from=32, row_to=48):
+    """
+    Center-align cells while preserving other style attributes.
+    """
+    for r in range(row_from, row_to + 1):
+        for c in range(start_col, end_col + 1):
+            cell = ws.cell(row=r, column=c)
+
+            # Copy existing alignment to avoid overwriting vertical/text wrap
+            current = cell.alignment
+            cell.alignment = Alignment(
+                horizontal="center",
+                vertical=current.vertical,
+                text_rotation=current.text_rotation,
+                wrap_text=current.wrap_text,
+                shrink_to_fit=current.shrink_to_fit,
+                indent=current.indent
+            )
+
 
 
 def force_recalc_on_open(wb: openpyxl.Workbook):
@@ -435,6 +455,8 @@ if st.button("✅ Apply and generate ZIP"):
 
                     force_two_decimals_keep_style(ws_dst, START_COL, last_day_col+1, 32, 48)
 
+                    # Center align days + total columns
+                    center_align_block(ws_dst,START_COL,last_day_col + 1,32,48)
 
                     # 6) Force recalc
                     force_recalc_on_open(wb_dst)
